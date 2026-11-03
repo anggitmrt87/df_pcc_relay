@@ -1,9 +1,6 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0-only
-# Copyright (C) 2026 SlakkyStar
-# Copyright (C) 2026 Claude (Anthropic)
-#
-# Host-side behaviour test
+
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -42,9 +39,8 @@ ${CC:-gcc} -std=gnu11 -O2 -Wall -Wextra -pthread \
 "$tmp/relay_test" --strength 50 -v > "$tmp/out.log" 2>&1 &
 pid=$!
 
-# Tunggu sampai ada log APPLY
 i=0
-while [ "$(wc -l < "$tmp/service.log")" -lt 1 ] && [ $i -lt 100 ]; do
+while ! grep -q "MATRIX SENT: 0.600000" "$tmp/out.log" && [ $i -lt 100 ]; do
     sleep 0.1; i=$((i + 1))
 done
 kill -TERM "$pid"
@@ -57,7 +53,6 @@ expect() {
     fi
 }
 
-# Hanya cek apakah logika parsing berjalan (karena spam mode mengirim banyak baris)
 expect "f 0.900000 f 0 f 0 f 0 f 0 f 0.800000 f 0 f 0 f 0 f 0 f 0.700000 f 0 f 0 f 0 f 0 f 1"
 expect "f 1.000000 f 0 f 0 f 0 f 0 f 0.777352 f 0 f 0 f 0 f 0 f 0.608307 f 0 f 0 f 0 f 0 f 1"
 expect "f 0.500000 f 0 f 0 f 0 f 0 f 0.500000 f 0 f 0 f 0 f 0 f 0.500000 f 0 f 0 f 0 f 0 f 1"

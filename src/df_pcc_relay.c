@@ -330,7 +330,6 @@ static void do_apply(const struct color *c)
     }
     argv[n] = NULL;
 
-    // --- DEBUG: Cetak angka yang dikirim ---
     if (g_verbose) {
         char dbg[512] = {0};
         for(int i=6; i<38; i+=2) {
@@ -355,7 +354,7 @@ static void do_apply(const struct color *c)
     }
     double dt = now_ms() - t0;
     
-    if (WIFEXITED(st) && WEXITSTATUS(st) == 0) { /* silent success */ }
+    if (WIFEXITED(st) && WEXITSTATUS(st) == 0) { }
     else if (WIFEXITED(st)) LOGE("APPLY failed rc=%d t=%.1fms", WEXITSTATUS(st), dt);
     else LOGE("APPLY killed by signal %d t=%.1fms", WTERMSIG(st), dt);
 }
@@ -363,30 +362,23 @@ static void do_apply(const struct color *c)
 static void *applier_main(void *arg)
 {
     (void)arg;
-    struct color last, cur;
-    int have_last = 0;
-    memset(&last, 0, sizeof last);
+    struct color cur;
     
     for (;;) {
         pthread_mutex_lock(&g_mu);
-        // Tunggu sampai ada perintah baru (slider digeser)
         while (!g_quit && !g_has_pending)
             pthread_cond_wait(&g_cv, &g_mu);
             
         if (g_quit) { pthread_mutex_unlock(&g_mu); break; }
         
         cur = g_pending;
-        g_has_pending = 0; // Reset antrean
+        g_has_pending = 0;
         pthread_mutex_unlock(&g_mu);
 
-        last = cur;
-        have_last = 1;
-        
-        // SPAM: Kirim 15 kali berturut-turut untuk melawan MIUI
         for (int i = 0; i < 15; i++) {
-            if (g_quit || g_has_pending) break; // Berhenti jika ada geseran baru
-            do_apply(&last);
-            sleep_ms(50); // Jeda 50ms
+            if (g_quit || g_has_pending) break;
+            do_apply(&cur);
+            sleep_ms(50);
         }
     }
     return NULL;
@@ -696,7 +688,6 @@ int main(int argc, char **argv)
             LOGE("invalid --strength '%s' (need integer 0..100), ignored", strength_arg);
         }
     } else if (bad_arg) {
-        /* logged */
     }
     if (!strcmp(src, "default")) {
         char pv[128] = "";

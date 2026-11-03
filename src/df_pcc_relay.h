@@ -65,4 +65,4 @@ static void logmsg(int prio, const char *fmt, ...) __attribute__((format(printf,
 #define LOGW(...) logmsg(L_WARN,  __VA_ARGS__)
 #define LOGE(...) logmsg(L_ERROR, __VA_ARGS__)
 
-#endif /* DF_PCC_RELAY_H */
+#endif
