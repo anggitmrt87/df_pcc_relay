@@ -18,13 +18,23 @@ X
 cat > "$tmp/logcat" <<'X'
 #!/bin/sh
 echo "setScreenEffect displayId=0 mode=0 value=0"
+sleep 0.1
 echo "PccData value 0.9, 0.8, 0.7"
-sleep 0.3
+sleep 0.1
+echo "PccData value 0.9, 0.8, 0.7"
+sleep 0.1
 echo "setScreenEffect displayId=0 mode=3 value=70"
+sleep 0.1
 echo "PccData value 0.5, 0.5, 0.5"
-sleep 0.3
+sleep 0.1
+echo "setScreenEffect displayId=0 mode=3 value=abc"
+sleep 0.1
 echo "setScreenEffect displayId=0 mode=3 value=0"
-sleep 0.3
+sleep 0.1
+echo "setScreenEffect displayId=0 mode=1 value=5"
+sleep 0.1
+echo "PccData value 0.6, 0.5, xx"
+sleep 0.1
 echo "PccData value 0.6, 0.5, 0.4"
 sleep 30
 X
@@ -43,6 +53,8 @@ i=0
 while ! grep -q "MATRIX SENT: 0.600000" "$tmp/out.log" && [ $i -lt 100 ]; do
     sleep 0.1; i=$((i + 1))
 done
+# Beri waktu agar spam mode selesai dan tercatat di service.log
+sleep 0.5
 kill -TERM "$pid"
 wait "$pid" || true
 pid=
