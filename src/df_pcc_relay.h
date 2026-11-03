@@ -34,6 +34,10 @@
 #define VERSION            "v7-c1"
 #define PROP_STRENGTH      "persist.df_pcc.strength"
 
+/* Batas level dari XML Android (paper_mode) */
+#define PAPER_MODE_MIN     50
+#define PAPER_MODE_MAX     255
+
 /* Overridable with -D so the logic can be tested on a PC. */
 #ifndef SERVICE_BIN
 #define SERVICE_BIN        "/system/bin/service"

@@ -101,18 +101,33 @@ static void micro(char *dst, size_t n, long long v)
     snprintf(dst, n, "%lld.%06lld", v / 1000000, v % 1000000);
 }
 
-/* Same integer maths as eye_triple() in the shell script. */
+/* Same integer maths as eye_triple() in the shell script, but uses dynamic UI values */
 static void eye_color(long val, int strength, struct color *o)
 {
-    if (val <= 0) {
+    /* Jika value 0 atau di bawah batas minimum UI, maka OFF */
+    if (val <= 0 || val < PAPER_MODE_MIN) {
         snprintf(o->c[0], sizeof o->c[0], "1.000000");
         snprintf(o->c[1], sizeof o->c[1], "1.000000");
         snprintf(o->c[2], sizeof o->c[2], "1.000000");
         return;
     }
-    long long e = 58000LL * strength / 100;
+
+    int dynamic_strength = strength;
+    
+    /* Jika user TIDAK meng-override strength via CLI/property, ambil nilai dari UI */
+    if (strength == DEFAULT_STRENGTH) {
+        if (val >= PAPER_MODE_MAX) {
+            dynamic_strength = 100;
+        } else {
+            /* Mapping dari (50..255) ke (0..100) */
+            dynamic_strength = (int)(((val - PAPER_MODE_MIN) * 100) / (PAPER_MODE_MAX - PAPER_MODE_MIN));
+        }
+    }
+
+    long long e = 58000LL * dynamic_strength / 100;
     long long g = 921569 - 4973LL * e / 1000;
     long long b = 901961 - 10126LL * e / 1000;
+    
     snprintf(o->c[0], sizeof o->c[0], "1.000000");
     micro(o->c[1], sizeof o->c[1], g);
     micro(o->c[2], sizeof o->c[2], b);
@@ -123,11 +138,6 @@ static int color_equal(const struct color *a, const struct color *b)
     return !strcmp(a->c[0], b->c[0]) && !strcmp(a->c[1], b->c[1]) && !strcmp(a->c[2], b->c[2]);
 }
 
-/*
- * fork+execv instead of posix_spawn: Termux's default API 24 sysroot does not
- * declare posix_spawn (bionic has it from API 28). out_fd < 0 means stdout to
- * /dev/null; pdeath makes the child die together with us.
- */
 static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int pdeath)
 {
     pid_t parent = getpid();
@@ -197,8 +207,6 @@ static int run_capture(const char *path, char *const argv[], char *out, size_t o
     return reap(pid, status);
 }
 
-/* Match argv[0]/argv[1] only, not the whole command line, so that e.g.
- * "logcat -s df_pcc_relay" typed by the user is never killed. */
 static const char *stale_reason(pid_t pid)
 {
     char path[48], buf[1024];
@@ -262,7 +270,6 @@ static int single_instance(void)
         LOGW("single-instance: cannot open %s: %s (continuing without flock)", LOCK_PATH, strerror(errno));
         return 0;
     }
-    /* a SIGKILLed predecessor releases the lock a moment later */
     for (int i = 0; i < 30; i++) {
         if (flock(fd, LOCK_EX | LOCK_NB) == 0) {
             char pidbuf[24];
@@ -282,7 +289,6 @@ static int single_instance(void)
     return -1;
 }
 
-/* "not found" contains "found" too; the shell script's `grep -q found` matched both. */
 static int sf_found(const char *out)
 {
     return strstr(out, "found") && !strstr(out, "not found");
@@ -322,7 +328,6 @@ static int wait_for_sf(void)
 
 static void do_apply(const struct color *c)
 {
-    /* 4x4 matrix with diagonal R, G, B, 1 */
     char *argv[3 + 1 + 2 + 32 + 1];
     int n = 0;
     argv[n++] = "service";
@@ -362,7 +367,6 @@ static void do_apply(const struct color *c)
              WTERMSIG(st), dt);
 }
 
-/* Newest value wins; applied only if it differs from the last one applied. */
 static void *applier_main(void *arg)
 {
     (void)arg;
@@ -378,7 +382,7 @@ static void *applier_main(void *arg)
         pthread_mutex_unlock(&g_mu);
 
         do_apply(&cur);
-        last = cur; /* like the script: even if apply failed */
+        last = cur;
         have_last = 1;
         sleep_ms(THROTTLE_MS);
     }
@@ -414,7 +418,6 @@ static int token(const char *s, char *dst, size_t n)
     return 1;
 }
 
-/* mp and vp point right after "mode=" and "value=" */
 static void handle_effect(const char *mp, const char *vp)
 {
     char m[32], v[32];
@@ -429,6 +432,23 @@ static void handle_effect(const char *mp, const char *vp)
             LOGE("parse: mode=3 value is not a number ('%s'), line skipped", v_ok ? v : "<too long>");
             return;
         }
+        
+        /* BUGFIX: Jika eye care dimatikan (0 atau di bawah minimum), lepas gembok g_lastmode */
+        if (val <= 0 || val < PAPER_MODE_MIN) {
+            if (g_lastmode == 3) {
+                g_lastmode = 0;
+            }
+            struct color c;
+            eye_color(0, g_strength, &c);
+            char what[96];
+            snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld (OFF)", val);
+            note_first(what);
+            if (g_verbose)
+                LOGD("eye care OFF -> %s %s %s", c.c[0], c.c[1], c.c[2]);
+            publish(&c);
+            return;
+        }
+
         g_lastmode = 3;
         struct color c;
         eye_color(val, g_strength, &c);
@@ -436,8 +456,7 @@ static void handle_effect(const char *mp, const char *vp)
         snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld", val);
         note_first(what);
         if (g_verbose)
-            LOGD("eye care %s -> %s %s %s (STRENGTH=%d)", val <= 0 ? "OFF" : "ON",
-                 c.c[0], c.c[1], c.c[2], g_strength);
+            LOGD("eye care ON val=%ld -> %s %s %s", val, c.c[0], c.c[1], c.c[2]);
         publish(&c);
     } else if (!strcmp(m, "0") || !strcmp(m, "1") || !strcmp(m, "2") || !strcmp(m, "23")) {
         g_lastmode = atoi(m);
@@ -445,7 +464,6 @@ static void handle_effect(const char *mp, const char *vp)
         snprintf(what, sizeof what, "setScreenEffect mode=%s", m);
         note_first(what);
     }
-    /* other modes: ignored, like the script */
 }
 
 static int parse_triple(const char *s, struct color *out)
@@ -555,7 +573,7 @@ static void reader_loop(void)
             continue;
         }
         g_logcat_pid = pid;
-        if (g_sig_stop) kill(pid, SIGKILL); /* signal came before pid was published */
+        if (g_sig_stop) kill(pid, SIGKILL);
         LOGI("logcat reader started pid=%d (start #%d)", (int)pid, ++starts);
 
         pump(p[0]);
@@ -665,19 +683,18 @@ int main(int argc, char **argv)
     }
     {
         struct color on;
-        eye_color(1, g_strength, &on);
+        eye_color(PAPER_MODE_MAX, g_strength, &on); /* Gunakan batas max untuk preview */
         LOGI("STRENGTH=%d (source: %s) -> eye care ON = %s %s %s", g_strength, src,
              on.c[0], on.c[1], on.c[2]);
     }
 
     struct sigaction sa;
     memset(&sa, 0, sizeof sa);
-    sa.sa_handler = on_signal; /* no SA_RESTART: read() gets EINTR */
+    sa.sa_handler = on_signal;
     sigemptyset(&sa.sa_mask);
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
-    /* SIGCHLD stays default: every child is waitpid()ed, SIG_IGN would lose exit codes */
 
     if (single_instance() < 0)
         return 1;
@@ -687,7 +704,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    /* the applier thread blocks SIGTERM/SIGINT so they reach the main thread */
     pthread_t th;
     pthread_attr_t attr;
     sigset_t blk, old;
@@ -706,7 +722,6 @@ int main(int argc, char **argv)
     }
     LOGI("applier thread started (throttle %d ms)", THROTTLE_MS);
 
-    /* the reader runs in the main thread: PDEATHSIG is tied to the forking thread */
     reader_loop();
 
     if (g_sig_no)
