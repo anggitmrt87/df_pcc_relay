@@ -130,14 +130,6 @@ static void eye_color(long val, int strength, struct color *o)
     micro(o->c[10], sizeof o->c[10], b);
 }
 
-static int color_equal(const struct color *a, const struct color *b)
-{
-    for (int i = 0; i < 16; i++) {
-        if (strcmp(a->c[i], b->c[i])) return 0;
-    }
-    return 1;
-}
-
 static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int pdeath)
 {
     pid_t parent = getpid();
@@ -338,6 +330,18 @@ static void do_apply(const struct color *c)
     }
     argv[n] = NULL;
 
+    // --- DEBUG: Cetak angka yang dikirim ---
+    if (g_verbose) {
+        char dbg[512] = {0};
+        for(int i=6; i<38; i+=2) {
+            if(argv[i+1]) {
+                strncat(dbg, argv[i+1], sizeof(dbg)-strlen(dbg)-1);
+                strncat(dbg, " ", sizeof(dbg)-strlen(dbg)-1);
+            }
+        }
+        LOGI("MATRIX SENT: %s", dbg);
+    }
+
     double t0 = now_ms();
     pid_t pid = spawn_child(SERVICE_BIN, argv, -1, 0);
     if (pid < 0) {
@@ -351,12 +355,9 @@ static void do_apply(const struct color *c)
     }
     double dt = now_ms() - t0;
     
-    if (WIFEXITED(st) && WEXITSTATUS(st) == 0)
-        LOGI("APPLY rc=0 t=%.1fms (M: %s %s %s ...)", dt, c->c[0], c->c[5], c->c[10]);
-    else if (WIFEXITED(st))
-        LOGE("APPLY failed rc=%d t=%.1fms", WEXITSTATUS(st), dt);
-    else
-        LOGE("APPLY killed by signal %d t=%.1fms", WTERMSIG(st), dt);
+    if (WIFEXITED(st) && WEXITSTATUS(st) == 0) { /* silent success */ }
+    else if (WIFEXITED(st)) LOGE("APPLY failed rc=%d t=%.1fms", WEXITSTATUS(st), dt);
+    else LOGE("APPLY killed by signal %d t=%.1fms", WTERMSIG(st), dt);
 }
 
 static void *applier_main(void *arg)
@@ -365,18 +366,28 @@ static void *applier_main(void *arg)
     struct color last, cur;
     int have_last = 0;
     memset(&last, 0, sizeof last);
+    
     for (;;) {
         pthread_mutex_lock(&g_mu);
-        while (!g_quit && !(g_has_pending && (!have_last || !color_equal(&g_pending, &last))))
+        // Tunggu sampai ada perintah baru (slider digeser)
+        while (!g_quit && !g_has_pending)
             pthread_cond_wait(&g_cv, &g_mu);
+            
         if (g_quit) { pthread_mutex_unlock(&g_mu); break; }
+        
         cur = g_pending;
+        g_has_pending = 0; // Reset antrean
         pthread_mutex_unlock(&g_mu);
 
-        do_apply(&cur);
         last = cur;
         have_last = 1;
-        sleep_ms(THROTTLE_MS);
+        
+        // SPAM: Kirim 15 kali berturut-turut untuk melawan MIUI
+        for (int i = 0; i < 15; i++) {
+            if (g_quit || g_has_pending) break; // Berhenti jika ada geseran baru
+            do_apply(&last);
+            sleep_ms(50); // Jeda 50ms
+        }
     }
     return NULL;
 }
@@ -503,8 +514,6 @@ static int parse_matrix(const char *s, struct color *out)
 static void handle_pcc(const char *rest)
 {
     if (g_verbose) LOGD("IN PccData value %s", rest);
-    
-    // BLOKIR MODE 3 SUDAH DIHAPUS, SELALU PROSES
     
     struct color c;
     if (!parse_matrix(rest, &c)) {

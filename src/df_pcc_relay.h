@@ -31,14 +31,12 @@
 #endif
 
 #define TAG                "df_pcc_relay"
-#define VERSION            "v9-final-matrix"
+#define VERSION            "v10-spam-mode"
 #define PROP_STRENGTH      "persist.df_pcc.strength"
 
-/* Batas level dari XML Android (paper_mode) */
 #define PAPER_MODE_MIN     50
 #define PAPER_MODE_MAX     255
 
-/* Overridable with -D so the logic can be tested on a PC. */
 #ifndef SERVICE_BIN
 #define SERVICE_BIN        "/system/bin/service"
 #endif
@@ -56,9 +54,8 @@
 #define SF_LOG_EVERY_S     5
 #define LINE_MAX_LEN       8192
 
-enum { L_DEBUG = 3, L_INFO = 4, L_WARN = 5, L_ERROR = 6 };   /* android_LogPriority */
+enum { L_DEBUG = 3, L_INFO = 4, L_WARN = 5, L_ERROR = 6 };
 
-/* Matriks 4x4 penuh disimpan sebagai string */
 struct color { char c[16][24]; };
 
 static void logmsg(int prio, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
