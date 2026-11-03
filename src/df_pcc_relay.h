@@ -31,7 +31,7 @@
 #endif
 
 #define TAG                "df_pcc_relay"
-#define VERSION            "v7-c1"
+#define VERSION            "v8-full-matrix"
 #define PROP_STRENGTH      "persist.df_pcc.strength"
 
 /* Batas level dari XML Android (paper_mode) */
@@ -58,8 +58,8 @@
 
 enum { L_DEBUG = 3, L_INFO = 4, L_WARN = 5, L_ERROR = 6 };   /* android_LogPriority */
 
-/* RGB triple kept as the exact "%.6f" strings passed to "service call". */
-struct color { char c[3][24]; };
+/* Matriks 4x4 penuh disimpan sebagai string "%.6f" */
+struct color { char c[16][24]; };
 
 static void logmsg(int prio, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 

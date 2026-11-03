@@ -4,10 +4,6 @@
  * Copyright (C) 2026 Claude (Anthropic)
  */
 
-/*
- * Relays lime displayfeature colour values from logcat to SurfaceFlinger
- */
-
 #include "df_pcc_relay.h"
 
 static int (*g_log_write)(int, const char *, const char *);
@@ -37,14 +33,14 @@ static void logmsg(int prio, const char *fmt, ...)
 }
 
 static int g_strength = DEFAULT_STRENGTH;
-static int g_strength_explicit = 0; /* Flag: 1 jika user memberikan --strength */
+static int g_strength_explicit = 0;
 static int g_verbose;
 
 static volatile sig_atomic_t g_sig_stop;
 static volatile sig_atomic_t g_sig_no;
 static volatile sig_atomic_t g_logcat_pid;
 
-static int g_lastmode = -1; /* LASTMODE from the script */
+static int g_lastmode = -1;
 static int g_first_logged;
 
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -102,31 +98,24 @@ static void micro(char *dst, size_t n, long long v)
     snprintf(dst, n, "%lld.%06lld", v / 1000000, v % 1000000);
 }
 
-/* Same integer maths as eye_triple() in the shell script */
+static void identity_matrix(struct color *o)
+{
+    for (int i = 0; i < 16; i++) {
+        snprintf(o->c[i], sizeof o->c[i], (i % 5 == 0) ? "1.000000" : "0.000000");
+    }
+}
+
 static void eye_color(long val, int strength, struct color *o)
 {
-    /* Jika value 0, berarti OFF */
-    if (val <= 0) {
-        snprintf(o->c[0], sizeof o->c[0], "1.000000");
-        snprintf(o->c[1], sizeof o->c[1], "1.000000");
-        snprintf(o->c[2], sizeof o->c[2], "1.000000");
-        return;
-    }
+    identity_matrix(o);
+    if (val <= 0) return;
 
     int dynamic_strength = strength;
-    
-    /* Jika user TIDAK memberikan --strength secara eksplisit, gunakan nilai UI (50-255) */
     if (!g_strength_explicit) {
-        if (val < PAPER_MODE_MIN) {
-            snprintf(o->c[0], sizeof o->c[0], "1.000000");
-            snprintf(o->c[1], sizeof o->c[1], "1.000000");
-            snprintf(o->c[2], sizeof o->c[2], "1.000000");
-            return;
-        }
+        if (val < PAPER_MODE_MIN) return;
         if (val >= PAPER_MODE_MAX) {
             dynamic_strength = 100;
         } else {
-            /* Mapping dari (50..255) ke (0..100) */
             dynamic_strength = (int)(((val - PAPER_MODE_MIN) * 100) / (PAPER_MODE_MAX - PAPER_MODE_MIN));
         }
     }
@@ -135,14 +124,16 @@ static void eye_color(long val, int strength, struct color *o)
     long long g = 921569 - 4973LL * e / 1000;
     long long b = 901961 - 10126LL * e / 1000;
     
-    snprintf(o->c[0], sizeof o->c[0], "1.000000");
-    micro(o->c[1], sizeof o->c[1], g);
-    micro(o->c[2], sizeof o->c[2], b);
+    micro(o->c[5], sizeof o->c[5], g);
+    micro(o->c[10], sizeof o->c[10], b);
 }
 
 static int color_equal(const struct color *a, const struct color *b)
 {
-    return !strcmp(a->c[0], b->c[0]) && !strcmp(a->c[1], b->c[1]) && !strcmp(a->c[2], b->c[2]);
+    for (int i = 0; i < 16; i++) {
+        if (strcmp(a->c[i], b->c[i])) return 0;
+    }
+    return 1;
 }
 
 static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int pdeath)
@@ -152,16 +143,14 @@ static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int p
     if (pid != 0)
         return pid;
 
-    /* child: async-signal-safe calls only from here */
     if (pdeath) {
         prctl(PR_SET_PDEATHSIG, SIGKILL);
-        if (getppid() != parent)
-            _exit(1);
+        if (getppid() != parent) _exit(1);
     }
-    signal(SIGPIPE, SIG_DFL); /* SIG_IGN survives exec */
+    signal(SIGPIPE, SIG_DFL);
     sigset_t none;
     sigemptyset(&none);
-    sigprocmask(SIG_SETMASK, &none, NULL); /* applier thread masks sigs */
+    sigprocmask(SIG_SETMASK, &none, NULL);
 
     int nul = open("/dev/null", O_RDWR);
     if (nul < 0) _exit(126);
@@ -230,15 +219,13 @@ static const char *stale_reason(pid_t pid)
     const char *a1 = (l0 + 1 < (size_t)n) ? buf + l0 + 1 : "";
     const char *b0 = base_name(a0), *b1 = base_name(a1);
 
-    if (!strcmp(b0, "df_pcc_relay"))
-        return "df_pcc_relay binary";
+    if (!strcmp(b0, "df_pcc_relay")) return "df_pcc_relay binary";
     if (!strcmp(b0, "df_pcc_relay.sh") ||
         (!strcmp(b1, "df_pcc_relay.sh") && (!strcmp(b0, "sh") || !strcmp(b0, "mksh") || !strcmp(b0, "bash"))))
         return "df_pcc_relay.sh script";
     if (!strcmp(b0, "logcat")) {
         for (const char *p = buf; p < buf + n; p += strlen(p) + 1)
-            if (strstr(p, "DisplayFeatureManagerService:D"))
-                return "displayfeature logcat reader";
+            if (strstr(p, "DisplayFeatureManagerService:D")) return "displayfeature logcat reader";
     }
     return NULL;
 }
@@ -345,33 +332,30 @@ static void do_apply(const struct color *c)
     argv[n++] = "1";
     for (int i = 0; i < 16; i++) {
         argv[n++] = "f";
-        argv[n++] = i == 0  ? (char *)c->c[0]
-                  : i == 5  ? (char *)c->c[1]
-                  : i == 10 ? (char *)c->c[2]
-                  : i == 15 ? "1" : "0";
+        argv[n++] = (char *)c->c[i];
     }
     argv[n] = NULL;
 
     double t0 = now_ms();
     pid_t pid = spawn_child(SERVICE_BIN, argv, -1, 0);
     if (pid < 0) {
-        LOGE("APPLY %s %s %s: fork failed: %s", c->c[0], c->c[1], c->c[2], strerror(errno));
+        LOGE("APPLY failed: fork: %s", strerror(errno));
         return;
     }
     int st = 0;
     if (reap(pid, &st) < 0) {
-        LOGE("APPLY %s %s %s: waitpid(%d) failed: %s", c->c[0], c->c[1], c->c[2], (int)pid, strerror(errno));
+        LOGE("APPLY failed: waitpid(%d): %s", (int)pid, strerror(errno));
         return;
     }
     double dt = now_ms() - t0;
+    
+    // Logging ringkas untuk matriks
     if (WIFEXITED(st) && WEXITSTATUS(st) == 0)
-        LOGI("APPLY %s %s %s rc=0 t=%.1fms", c->c[0], c->c[1], c->c[2], dt);
+        LOGI("APPLY rc=0 t=%.1fms (M: %s %s %s ...)", dt, c->c[0], c->c[5], c->c[10]);
     else if (WIFEXITED(st))
-        LOGE("APPLY %s %s %s rc=%d%s t=%.1fms", c->c[0], c->c[1], c->c[2], WEXITSTATUS(st),
-             WEXITSTATUS(st) == 127 ? " (exec failed)" : "", dt);
+        LOGE("APPLY failed rc=%d t=%.1fms", WEXITSTATUS(st), dt);
     else
-        LOGE("APPLY %s %s %s killed by signal %d t=%.1fms", c->c[0], c->c[1], c->c[2],
-             WTERMSIG(st), dt);
+        LOGE("APPLY killed by signal %d t=%.1fms", WTERMSIG(st), dt);
 }
 
 static void *applier_main(void *arg)
@@ -440,18 +424,14 @@ static void handle_effect(const char *mp, const char *vp)
             return;
         }
         
-        /* BUGFIX: Jika eye care dimatikan (0 atau di bawah minimum), lepas gembok g_lastmode */
         if (val <= 0 || (!g_strength_explicit && val < PAPER_MODE_MIN)) {
-            if (g_lastmode == 3) {
-                g_lastmode = 0;
-            }
+            if (g_lastmode == 3) g_lastmode = 0;
             struct color c;
             eye_color(0, g_strength, &c);
             char what[96];
             snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld (OFF)", val);
             note_first(what);
-            if (g_verbose)
-                LOGD("eye care OFF -> %s %s %s", c.c[0], c.c[1], c.c[2]);
+            if (g_verbose) LOGD("eye care OFF");
             publish(&c);
             return;
         }
@@ -462,8 +442,7 @@ static void handle_effect(const char *mp, const char *vp)
         char what[96];
         snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld", val);
         note_first(what);
-        if (g_verbose)
-            LOGD("eye care ON val=%ld -> %s %s %s", val, c.c[0], c.c[1], c.c[2]);
+        if (g_verbose) LOGD("eye care ON val=%ld", val);
         publish(&c);
     } else if (!strcmp(m, "0") || !strcmp(m, "1") || !strcmp(m, "2") || !strcmp(m, "23")) {
         g_lastmode = atoi(m);
@@ -473,44 +452,79 @@ static void handle_effect(const char *mp, const char *vp)
     }
 }
 
-static int parse_triple(const char *s, struct color *out)
+static int parse_matrix(const char *s, struct color *out)
 {
+    double vals[16];
+    int count = 0;
     const char *p = s;
-    for (int i = 0; i < 3; i++) {
-        while (*p == ' ') p++;
+    
+    // Baca angka (bisa dipisah koma atau spasi)
+    while (*p && count < 16) {
+        while (*p == ' ' || *p == ',' || *p == '\t') p++;
+        if (!*p) break;
         char *end;
         errno = 0;
         double d = strtod(p, &end);
         if (end == p || errno || !isfinite(d)) return 0;
-        int n = snprintf(out->c[i], sizeof out->c[i], "%.6f", d);
-        if (n < 0 || (size_t)n >= sizeof out->c[i]) return 0;
+        vals[count++] = d;
         p = end;
-        if (i < 2) {
-            while (*p == ' ') p++;
-            if (*p != ',') return 0;
-            p++;
-        }
     }
-    return 1;
+    
+    if (count == 3) {
+        // RGB standar (diagonal)
+        identity_matrix(out);
+        snprintf(out->c[0], sizeof out->c[0], "%.6f", vals[0]);
+        snprintf(out->c[5], sizeof out->c[5], "%.6f", vals[1]);
+        snprintf(out->c[10], sizeof out->c[10], "%.6f", vals[2]);
+        return 1;
+    } else if (count == 9) {
+        // Matriks 3x3
+        identity_matrix(out);
+        snprintf(out->c[0], sizeof out->c[0], "%.6f", vals[0]);
+        snprintf(out->c[1], sizeof out->c[1], "%.6f", vals[1]);
+        snprintf(out->c[2], sizeof out->c[2], "%.6f", vals[2]);
+        snprintf(out->c[4], sizeof out->c[4], "%.6f", vals[3]);
+        snprintf(out->c[5], sizeof out->c[5], "%.6f", vals[4]);
+        snprintf(out->c[6], sizeof out->c[6], "%.6f", vals[5]);
+        snprintf(out->c[8], sizeof out->c[8], "%.6f", vals[6]);
+        snprintf(out->c[9], sizeof out->c[9], "%.6f", vals[7]);
+        snprintf(out->c[10], sizeof out->c[10], "%.6f", vals[8]);
+        return 1;
+    } else if (count == 16) {
+        // Matriks 4x4 penuh
+        for (int i = 0; i < 16; i++) {
+            snprintf(out->c[i], sizeof out->c[i], "%.6f", vals[i]);
+        }
+        return 1;
+    }
+    
+    return 0;
 }
 
 static void handle_pcc(const char *rest)
 {
-    if (g_verbose) LOGD("IN PccData value %s (LASTMODE=%d)", rest, g_lastmode);
-    if (g_lastmode == 3) return;
+    if (g_verbose) LOGD("IN PccData value %s", rest);
+    
+    // BLOKIR MODE 3 SUDAH DIHAPUS
+    
     struct color c;
-    if (!parse_triple(rest, &c)) {
-        LOGE("parse: bad PccData triple: '%s', line skipped", rest);
+    if (!parse_matrix(rest, &c)) {
+        LOGE("parse: bad matrix: '%s', line skipped", rest);
         return;
     }
     char what[96];
-    snprintf(what, sizeof what, "PccData %s %s %s", c.c[0], c.c[1], c.c[2]);
+    snprintf(what, sizeof what, "Matrix applied from PccData");
     note_first(what);
     publish(&c);
 }
 
 static void handle_line(const char *line)
 {
+    // MATA-MATA: Cetak log mentah untuk melihat format Hue/Sat/Contrast
+    if (strstr(line, "displayfeature") || strstr(line, "DisplayFeatureManager") || strstr(line, "Pcc")) {
+        if (g_verbose) LOGI("RAW LOG: %s", line);
+    }
+
     const char *p = strstr(line, "setScreenEffect displayId=");
     if (p) {
         const char *mp = strstr(p, "mode=");
@@ -626,9 +640,8 @@ static void sanitize_stdio(void)
 static void usage(void)
 {
     fprintf(stderr, "usage: " TAG " [--strength N] [-v]\n"
-                    "  --strength N   eye care strength 0..100 (default %d, or property " PROP_STRENGTH ")\n"
-                    "  -v             verbose: log every incoming setScreenEffect / PccData\n",
-            DEFAULT_STRENGTH);
+                    "  --strength N   eye care strength 0..100\n"
+                    "  -v             verbose: log every incoming data\n");
 }
 
 int main(int argc, char **argv)
@@ -671,12 +684,12 @@ int main(int argc, char **argv)
         if (parse_long(strength_arg, &sv) && sv >= 0 && sv <= 100) {
             g_strength = (int)sv;
             src = "argument";
-            g_strength_explicit = 1; /* Kunci nilai dari argumen */
+            g_strength_explicit = 1;
         } else {
             LOGE("invalid --strength '%s' (need integer 0..100), ignored", strength_arg);
         }
     } else if (bad_arg) {
-        /* already logged */
+        /* logged */
     }
     if (!strcmp(src, "default")) {
         char pv[128] = "";
@@ -684,7 +697,7 @@ int main(int argc, char **argv)
             if (parse_long(pv, &sv) && sv >= 0 && sv <= 100) {
                 g_strength = (int)sv;
                 src = "property";
-                g_strength_explicit = 1; /* Kunci nilai dari property */
+                g_strength_explicit = 1;
             } else {
                 LOGE("invalid property " PROP_STRENGTH "='%s' (need integer 0..100), ignored", pv);
             }
@@ -694,7 +707,7 @@ int main(int argc, char **argv)
         struct color on;
         eye_color(PAPER_MODE_MAX, g_strength, &on);
         LOGI("STRENGTH=%d (source: %s) -> eye care ON = %s %s %s", g_strength, src,
-             on.c[0], on.c[1], on.c[2]);
+             on.c[0], on.c[5], on.c[10]);
     }
 
     struct sigaction sa;
