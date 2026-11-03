@@ -37,6 +37,7 @@ static void logmsg(int prio, const char *fmt, ...)
 }
 
 static int g_strength = DEFAULT_STRENGTH;
+static int g_strength_explicit = 0; /* Flag: 1 jika user memberikan --strength */
 static int g_verbose;
 
 static volatile sig_atomic_t g_sig_stop;
@@ -101,11 +102,11 @@ static void micro(char *dst, size_t n, long long v)
     snprintf(dst, n, "%lld.%06lld", v / 1000000, v % 1000000);
 }
 
-/* Same integer maths as eye_triple() in the shell script, but uses dynamic UI values */
+/* Same integer maths as eye_triple() in the shell script */
 static void eye_color(long val, int strength, struct color *o)
 {
-    /* Jika value 0 atau di bawah batas minimum UI, maka OFF */
-    if (val <= 0 || val < PAPER_MODE_MIN) {
+    /* Jika value 0, berarti OFF */
+    if (val <= 0) {
         snprintf(o->c[0], sizeof o->c[0], "1.000000");
         snprintf(o->c[1], sizeof o->c[1], "1.000000");
         snprintf(o->c[2], sizeof o->c[2], "1.000000");
@@ -114,8 +115,14 @@ static void eye_color(long val, int strength, struct color *o)
 
     int dynamic_strength = strength;
     
-    /* Jika user TIDAK meng-override strength via CLI/property, ambil nilai dari UI */
-    if (strength == DEFAULT_STRENGTH) {
+    /* Jika user TIDAK memberikan --strength secara eksplisit, gunakan nilai UI (50-255) */
+    if (!g_strength_explicit) {
+        if (val < PAPER_MODE_MIN) {
+            snprintf(o->c[0], sizeof o->c[0], "1.000000");
+            snprintf(o->c[1], sizeof o->c[1], "1.000000");
+            snprintf(o->c[2], sizeof o->c[2], "1.000000");
+            return;
+        }
         if (val >= PAPER_MODE_MAX) {
             dynamic_strength = 100;
         } else {
@@ -434,7 +441,7 @@ static void handle_effect(const char *mp, const char *vp)
         }
         
         /* BUGFIX: Jika eye care dimatikan (0 atau di bawah minimum), lepas gembok g_lastmode */
-        if (val <= 0 || val < PAPER_MODE_MIN) {
+        if (val <= 0 || (!g_strength_explicit && val < PAPER_MODE_MIN)) {
             if (g_lastmode == 3) {
                 g_lastmode = 0;
             }
@@ -664,6 +671,7 @@ int main(int argc, char **argv)
         if (parse_long(strength_arg, &sv) && sv >= 0 && sv <= 100) {
             g_strength = (int)sv;
             src = "argument";
+            g_strength_explicit = 1; /* Kunci nilai dari argumen */
         } else {
             LOGE("invalid --strength '%s' (need integer 0..100), ignored", strength_arg);
         }
@@ -676,6 +684,7 @@ int main(int argc, char **argv)
             if (parse_long(pv, &sv) && sv >= 0 && sv <= 100) {
                 g_strength = (int)sv;
                 src = "property";
+                g_strength_explicit = 1; /* Kunci nilai dari property */
             } else {
                 LOGE("invalid property " PROP_STRENGTH "='%s' (need integer 0..100), ignored", pv);
             }
@@ -683,7 +692,7 @@ int main(int argc, char **argv)
     }
     {
         struct color on;
-        eye_color(PAPER_MODE_MAX, g_strength, &on); /* Gunakan batas max untuk preview */
+        eye_color(PAPER_MODE_MAX, g_strength, &on);
         LOGI("STRENGTH=%d (source: %s) -> eye care ON = %s %s %s", g_strength, src,
              on.c[0], on.c[1], on.c[2]);
     }
