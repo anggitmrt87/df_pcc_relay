@@ -1,0 +1,9 @@
+on property:sys.boot_completed=1
+    start df_pcc_relay
+
+service df_pcc_relay /system/bin/df_pcc_relay
+    class late_start
+    user root
+    group system root log
+    seclabel u:r:hal_graphics_composer_default:s0
+    disabled
