@@ -101,7 +101,9 @@ static void micro(char *dst, size_t n, long long v)
 static void identity_matrix(struct color *o)
 {
     for (int i = 0; i < 16; i++) {
-        snprintf(o->c[i], sizeof o->c[i], (i % 5 == 0) ? "1.000000" : "0.000000");
+        if (i == 15) snprintf(o->c[i], sizeof o->c[i], "1");
+        else if (i % 5 == 0) snprintf(o->c[i], sizeof o->c[i], "1.000000");
+        else snprintf(o->c[i], sizeof o->c[i], "0");
     }
 }
 
@@ -349,7 +351,6 @@ static void do_apply(const struct color *c)
     }
     double dt = now_ms() - t0;
     
-    // Logging ringkas untuk matriks
     if (WIFEXITED(st) && WEXITSTATUS(st) == 0)
         LOGI("APPLY rc=0 t=%.1fms (M: %s %s %s ...)", dt, c->c[0], c->c[5], c->c[10]);
     else if (WIFEXITED(st))
@@ -458,7 +459,6 @@ static int parse_matrix(const char *s, struct color *out)
     int count = 0;
     const char *p = s;
     
-    // Baca angka (bisa dipisah koma atau spasi)
     while (*p && count < 16) {
         while (*p == ' ' || *p == ',' || *p == '\t') p++;
         if (!*p) break;
@@ -471,14 +471,12 @@ static int parse_matrix(const char *s, struct color *out)
     }
     
     if (count == 3) {
-        // RGB standar (diagonal)
         identity_matrix(out);
         snprintf(out->c[0], sizeof out->c[0], "%.6f", vals[0]);
         snprintf(out->c[5], sizeof out->c[5], "%.6f", vals[1]);
         snprintf(out->c[10], sizeof out->c[10], "%.6f", vals[2]);
         return 1;
     } else if (count == 9) {
-        // Matriks 3x3
         identity_matrix(out);
         snprintf(out->c[0], sizeof out->c[0], "%.6f", vals[0]);
         snprintf(out->c[1], sizeof out->c[1], "%.6f", vals[1]);
@@ -491,9 +489,10 @@ static int parse_matrix(const char *s, struct color *out)
         snprintf(out->c[10], sizeof out->c[10], "%.6f", vals[8]);
         return 1;
     } else if (count == 16) {
-        // Matriks 4x4 penuh
         for (int i = 0; i < 16; i++) {
-            snprintf(out->c[i], sizeof out->c[i], "%.6f", vals[i]);
+            if (vals[i] == 0.0) snprintf(out->c[i], sizeof out->c[i], "0");
+            else if (vals[i] == 1.0) snprintf(out->c[i], sizeof out->c[i], "1");
+            else snprintf(out->c[i], sizeof out->c[i], "%.6f", vals[i]);
         }
         return 1;
     }
@@ -505,7 +504,7 @@ static void handle_pcc(const char *rest)
 {
     if (g_verbose) LOGD("IN PccData value %s", rest);
     
-    // BLOKIR MODE 3 SUDAH DIHAPUS
+    // BLOKIR MODE 3 SUDAH DIHAPUS, SELALU PROSES
     
     struct color c;
     if (!parse_matrix(rest, &c)) {
@@ -520,7 +519,6 @@ static void handle_pcc(const char *rest)
 
 static void handle_line(const char *line)
 {
-    // MATA-MATA: Cetak log mentah untuk melihat format Hue/Sat/Contrast
     if (strstr(line, "displayfeature") || strstr(line, "DisplayFeatureManager") || strstr(line, "Pcc")) {
         if (g_verbose) LOGI("RAW LOG: %s", line);
     }

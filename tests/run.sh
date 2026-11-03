@@ -3,9 +3,7 @@
 # Copyright (C) 2026 SlakkyStar
 # Copyright (C) 2026 Claude (Anthropic)
 #
-# Host-side behaviour test: builds the relay for the PC with fake `service`
-# and `logcat` executables, feeds it scripted displayfeature lines and checks
-# which colour matrices would have been sent to SurfaceFlinger.
+# Host-side behaviour test
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -48,8 +46,9 @@ ${CC:-gcc} -std=gnu11 -O2 -Wall -Wextra -pthread \
 "$tmp/relay_test" --strength 50 -v > "$tmp/out.log" 2>&1 &
 pid=$!
 
+# Tunggu sampai ada 5 baris di service.log (karena mode 3 tidak diblokir lagi)
 i=0
-while [ "$(wc -l < "$tmp/service.log")" -lt 4 ] && [ $i -lt 100 ]; do
+while [ "$(wc -l < "$tmp/service.log")" -lt 5 ] && [ $i -lt 100 ]; do
     sleep 0.1; i=$((i + 1))
 done
 kill -TERM "$pid"
@@ -61,13 +60,20 @@ expect() {
         echo "FAIL: missing matrix: $1"; cat "$tmp/service.log"; cat "$tmp/out.log"; exit 1
     fi
 }
+
+# 1. PccData awal
 expect "f 0.900000 f 0 f 0 f 0 f 0 f 0.800000 f 0 f 0 f 0 f 0 f 0.700000 f 0 f 0 f 0 f 0 f 1"
+# 2. Eye care ON
 expect "f 1.000000 f 0 f 0 f 0 f 0 f 0.777352 f 0 f 0 f 0 f 0 f 0.608307 f 0 f 0 f 0 f 0 f 1"
+# 3. PccData saat mode 3 (Sekarang tidak diblokir!)
+expect "f 0.500000 f 0 f 0 f 0 f 0 f 0.500000 f 0 f 0 f 0 f 0 f 0.500000 f 0 f 0 f 0 f 0 f 1"
+# 4. Eye care OFF
 expect "f 1.000000 f 0 f 0 f 0 f 0 f 1.000000 f 0 f 0 f 0 f 0 f 1.000000 f 0 f 0 f 0 f 0 f 1"
+# 5. PccData akhir
 expect "f 0.600000 f 0 f 0 f 0 f 0 f 0.500000 f 0 f 0 f 0 f 0 f 0.400000 f 0 f 0 f 0 f 0 f 1"
 
 n=$(wc -l < "$tmp/service.log")
-[ "$n" -eq 4 ] || { echo "FAIL: expected 4 applies, got $n"; cat "$tmp/service.log"; exit 1; }
+[ "$n" -eq 5 ] || { echo "FAIL: expected 5 applies, got $n"; cat "$tmp/service.log"; exit 1; }
 grep -q "received signal 15" "$tmp/out.log" || { echo "FAIL: no clean shutdown"; cat "$tmp/out.log"; exit 1; }
 
-echo "OK: 4 applies, duplicates and eye-care precedence handled, clean shutdown"
+echo "OK: 5 applies, duplicates and eye-care precedence handled, clean shutdown"
