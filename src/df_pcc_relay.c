@@ -4,6 +4,7 @@
  * Copyright (C) 2026 Claude (Anthropic)
  */
 
+/* SPDX-License-Identifier: GPL-2.0-only */
 #include "df_pcc_relay.h"
 
 static int (*g_log_write)(int, const char *, const char *);
@@ -11,10 +12,8 @@ static int (*g_log_write)(int, const char *, const char *);
 static void log_init(void)
 {
     void *h = dlopen("liblog.so", RTLD_NOW);
-    if (h)
-        g_log_write = (int (*)(int, const char *, const char *))dlsym(h, "__android_log_write");
-    if (!g_log_write)
-        fprintf(stderr, TAG ": liblog.so not usable, logging to stderr\n");
+    if (h) g_log_write = (int (*)(int, const char *, const char *))dlsym(h, "__android_log_write");
+    if (!g_log_write) fprintf(stderr, TAG ": liblog.so not usable, logging to stderr\n");
 }
 
 static void logmsg(int prio, const char *fmt, ...)
@@ -49,28 +48,23 @@ static struct color    g_pending;
 static int             g_has_pending;
 static int             g_quit;
 
-static void sleep_ms(long ms)
-{
+static void sleep_ms(long ms) {
     struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-    while (nanosleep(&ts, &ts) < 0 && errno == EINTR && !g_sig_stop)
-        ;
+    while (nanosleep(&ts, &ts) < 0 && errno == EINTR && !g_sig_stop) ;
 }
 
-static double now_ms(void)
-{
+static double now_ms(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
 
-static const char *base_name(const char *p)
-{
+static const char *base_name(const char *p) {
     const char *s = strrchr(p, '/');
     return s ? s + 1 : p;
 }
 
-static int parse_long(const char *s, long *out)
-{
+static int parse_long(const char *s, long *out) {
     char *end;
     if (!*s) return 0;
     errno = 0;
@@ -80,8 +74,7 @@ static int parse_long(const char *s, long *out)
     return 1;
 }
 
-static int prop_get(const char *name, char *val)
-{
+static int prop_get(const char *name, char *val) {
 #ifdef __ANDROID__
     return __system_property_get(name, val);
 #else
@@ -93,13 +86,11 @@ static int prop_get(const char *name, char *val)
 #endif
 }
 
-static void micro(char *dst, size_t n, long long v)
-{
+static void micro(char *dst, size_t n, long long v) {
     snprintf(dst, n, "%lld.%06lld", v / 1000000, v % 1000000);
 }
 
-static void identity_matrix(struct color *o)
-{
+static void identity_matrix(struct color *o) {
     for (int i = 0; i < 16; i++) {
         if (i == 15) snprintf(o->c[i], sizeof o->c[i], "1");
         else if (i % 5 == 0) snprintf(o->c[i], sizeof o->c[i], "1.000000");
@@ -107,8 +98,7 @@ static void identity_matrix(struct color *o)
     }
 }
 
-static void eye_color(long val, int strength, struct color *o)
-{
+static void eye_color(long val, int strength, struct color *o) {
     identity_matrix(o);
     if (val <= 0) return;
 
@@ -130,12 +120,10 @@ static void eye_color(long val, int strength, struct color *o)
     micro(o->c[10], sizeof o->c[10], b);
 }
 
-static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int pdeath)
-{
+static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int pdeath) {
     pid_t parent = getpid();
     pid_t pid = fork();
-    if (pid != 0)
-        return pid;
+    if (pid != 0) return pid;
 
     if (pdeath) {
         prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -155,8 +143,7 @@ static pid_t spawn_child(const char *path, char *const argv[], int out_fd, int p
     _exit(127);
 }
 
-static int reap(pid_t pid, int *status)
-{
+static int reap(pid_t pid, int *status) {
     for (;;) {
         pid_t r = waitpid(pid, status, 0);
         if (r == pid) return 0;
@@ -168,8 +155,7 @@ static int reap(pid_t pid, int *status)
     }
 }
 
-static int run_capture(const char *path, char *const argv[], char *out, size_t outsz, int *status)
-{
+static int run_capture(const char *path, char *const argv[], char *out, size_t outsz, int *status) {
     int p[2];
     out[0] = 0;
     if (pipe2(p, O_CLOEXEC) < 0) { LOGE("pipe2: %s", strerror(errno)); return -1; }
@@ -197,8 +183,7 @@ static int run_capture(const char *path, char *const argv[], char *out, size_t o
     return reap(pid, status);
 }
 
-static const char *stale_reason(pid_t pid)
-{
+static const char *stale_reason(pid_t pid) {
     char path[48], buf[1024];
     snprintf(path, sizeof path, "/proc/%d/cmdline", (int)pid);
     int fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -214,9 +199,7 @@ static const char *stale_reason(pid_t pid)
     const char *b0 = base_name(a0), *b1 = base_name(a1);
 
     if (!strcmp(b0, "df_pcc_relay")) return "df_pcc_relay binary";
-    if (!strcmp(b0, "df_pcc_relay.sh") ||
-        (!strcmp(b1, "df_pcc_relay.sh") && (!strcmp(b0, "sh") || !strcmp(b0, "mksh") || !strcmp(b0, "bash"))))
-        return "df_pcc_relay.sh script";
+    if (!strcmp(b0, "df_pcc_relay.sh") || (!strcmp(b1, "df_pcc_relay.sh") && (!strcmp(b0, "sh") || !strcmp(b0, "mksh") || !strcmp(b0, "bash")))) return "df_pcc_relay.sh script";
     if (!strcmp(b0, "logcat")) {
         for (const char *p = buf; p < buf + n; p += strlen(p) + 1)
             if (strstr(p, "DisplayFeatureManagerService:D")) return "displayfeature logcat reader";
@@ -224,8 +207,7 @@ static const char *stale_reason(pid_t pid)
     return NULL;
 }
 
-static int kill_stale(void)
-{
+static int kill_stale(void) {
     DIR *d = opendir("/proc");
     if (!d) { LOGE("single-instance: opendir /proc: %s", strerror(errno)); return -1; }
     int killed = 0;
@@ -248,8 +230,7 @@ static int kill_stale(void)
     return killed;
 }
 
-static int single_instance(void)
-{
+static int single_instance(void) {
     int killed = kill_stale();
     LOGI("single-instance: stale processes killed: %d", killed < 0 ? 0 : killed);
 
@@ -277,13 +258,11 @@ static int single_instance(void)
     return -1;
 }
 
-static int sf_found(const char *out)
-{
+static int sf_found(const char *out) {
     return strstr(out, "found") && !strstr(out, "not found");
 }
 
-static int wait_for_sf(void)
-{
+static int wait_for_sf(void) {
     char *const argv[] = { "service", "check", "SurfaceFlinger", NULL };
     double t0 = now_ms(), last_log = 0;
     int tries = 0, logged = 0;
@@ -314,8 +293,7 @@ static int wait_for_sf(void)
     }
 }
 
-static void do_apply(const struct color *c)
-{
+static void do_apply(const struct color *c) {
     char *argv[3 + 1 + 2 + 32 + 1];
     int n = 0;
     argv[n++] = "service";
@@ -330,37 +308,21 @@ static void do_apply(const struct color *c)
     }
     argv[n] = NULL;
 
-    if (g_verbose) {
-        char dbg[512] = {0};
-        for(int i=6; i<38; i+=2) {
-            if(argv[i+1]) {
-                strncat(dbg, argv[i+1], sizeof(dbg)-strlen(dbg)-1);
-                strncat(dbg, " ", sizeof(dbg)-strlen(dbg)-1);
-            }
-        }
-        LOGI("MATRIX SENT: %s", dbg);
-    }
-
-    double t0 = now_ms();
-    pid_t pid = spawn_child(SERVICE_BIN, argv, -1, 0);
-    if (pid < 0) {
-        LOGE("APPLY failed: fork: %s", strerror(errno));
-        return;
-    }
+    char out[256] = {0};
     int st = 0;
-    if (reap(pid, &st) < 0) {
-        LOGE("APPLY failed: waitpid(%d): %s", (int)pid, strerror(errno));
-        return;
+    int rc = run_capture(SERVICE_BIN, argv, out, sizeof out, &st);
+
+    if (rc == 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0) {
+        // Menangkap output sukses
+        char *nl = strchr(out, '\n');
+        if (nl) *nl = 0;
+        if (g_verbose) LOGI("APPLY OK: %s", out[0] ? out : "no output");
+    } else {
+        LOGE("APPLY FAILED rc=%d", rc);
     }
-    double dt = now_ms() - t0;
-    
-    if (WIFEXITED(st) && WEXITSTATUS(st) == 0) { }
-    else if (WIFEXITED(st)) LOGE("APPLY failed rc=%d t=%.1fms", WEXITSTATUS(st), dt);
-    else LOGE("APPLY killed by signal %d t=%.1fms", WTERMSIG(st), dt);
 }
 
-static void *applier_main(void *arg)
-{
+static void *applier_main(void *arg) {
     (void)arg;
     struct color cur;
     
@@ -375,17 +337,17 @@ static void *applier_main(void *arg)
         g_has_pending = 0;
         pthread_mutex_unlock(&g_mu);
 
-        for (int i = 0; i < 15; i++) {
+        // SPAM EKSTREM: Kirim 100 kali setiap 20ms (Total 2 detik)
+        for (int i = 0; i < 100; i++) {
             if (g_quit || g_has_pending) break;
             do_apply(&cur);
-            sleep_ms(50);
+            sleep_ms(20);
         }
     }
     return NULL;
 }
 
-static void publish(const struct color *c)
-{
+static void publish(const struct color *c) {
     pthread_mutex_lock(&g_mu);
     g_pending = *c;
     g_has_pending = 1;
@@ -393,16 +355,14 @@ static void publish(const struct color *c)
     pthread_mutex_unlock(&g_mu);
 }
 
-static void note_first(const char *what)
-{
+static void note_first(const char *what) {
     if (!g_first_logged) {
         g_first_logged = 1;
         LOGI("first event accepted: %s", what);
     }
 }
 
-static int token(const char *s, char *dst, size_t n)
-{
+static int token(const char *s, char *dst, size_t n) {
     size_t i = 0;
     while (s[i] && s[i] != ' ' && s[i] != '\t') {
         if (i + 1 >= n) { dst[0] = 0; return 0; }
@@ -413,51 +373,36 @@ static int token(const char *s, char *dst, size_t n)
     return 1;
 }
 
-static void handle_effect(const char *mp, const char *vp)
-{
+static void handle_effect(const char *mp, const char *vp) {
     char m[32], v[32];
     int m_ok = token(mp, m, sizeof m);
     int v_ok = token(vp, v, sizeof v);
     if (g_verbose) LOGD("IN setScreenEffect mode=%s value=%s", m_ok ? m : "?", v_ok ? v : "?");
-    if (!m_ok) { LOGE("parse: bad mode token in setScreenEffect, line skipped"); return; }
+    if (!m_ok) return;
 
     if (!strcmp(m, "3")) {
         long val;
-        if (!v_ok || !parse_long(v, &val)) {
-            LOGE("parse: mode=3 value is not a number ('%s'), line skipped", v_ok ? v : "<too long>");
-            return;
-        }
+        if (!v_ok || !parse_long(v, &val)) return;
         
         if (val <= 0 || (!g_strength_explicit && val < PAPER_MODE_MIN)) {
             if (g_lastmode == 3) g_lastmode = 0;
             struct color c;
             eye_color(0, g_strength, &c);
-            char what[96];
-            snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld (OFF)", val);
-            note_first(what);
-            if (g_verbose) LOGD("eye care OFF");
+            note_first("setScreenEffect mode=3 (OFF)");
             publish(&c);
             return;
         }
-
         g_lastmode = 3;
         struct color c;
         eye_color(val, g_strength, &c);
-        char what[96];
-        snprintf(what, sizeof what, "setScreenEffect mode=3 value=%ld", val);
-        note_first(what);
-        if (g_verbose) LOGD("eye care ON val=%ld", val);
+        note_first("setScreenEffect mode=3");
         publish(&c);
     } else if (!strcmp(m, "0") || !strcmp(m, "1") || !strcmp(m, "2") || !strcmp(m, "23")) {
         g_lastmode = atoi(m);
-        char what[96];
-        snprintf(what, sizeof what, "setScreenEffect mode=%s", m);
-        note_first(what);
     }
 }
 
-static int parse_matrix(const char *s, struct color *out)
-{
+static int parse_matrix(const char *s, struct color *out) {
     double vals[16];
     int count = 0;
     const char *p = s;
@@ -499,31 +444,21 @@ static int parse_matrix(const char *s, struct color *out)
         }
         return 1;
     }
-    
     return 0;
 }
 
-static void handle_pcc(const char *rest)
-{
+static void handle_pcc(const char *rest) {
     if (g_verbose) LOGD("IN PccData value %s", rest);
-    
     struct color c;
-    if (!parse_matrix(rest, &c)) {
-        LOGE("parse: bad matrix: '%s', line skipped", rest);
-        return;
-    }
-    char what[96];
-    snprintf(what, sizeof what, "Matrix applied from PccData");
-    note_first(what);
+    if (!parse_matrix(rest, &c)) return;
+    note_first("PccData");
     publish(&c);
 }
 
-static void handle_line(const char *line)
-{
+static void handle_line(const char *line) {
     if (strstr(line, "displayfeature") || strstr(line, "DisplayFeatureManager") || strstr(line, "Pcc")) {
         if (g_verbose) LOGI("RAW LOG: %s", line);
     }
-
     const char *p = strstr(line, "setScreenEffect displayId=");
     if (p) {
         const char *mp = strstr(p, "mode=");
@@ -538,8 +473,7 @@ static void handle_line(const char *line)
     }
 }
 
-static void pump(int fd)
-{
+static void pump(int fd) {
     static char buf[LINE_MAX_LEN];
     size_t len = 0;
     int discard = 0;
@@ -547,7 +481,6 @@ static void pump(int fd)
         ssize_t n = read(fd, buf + len, sizeof buf - 1 - len);
         if (n < 0) {
             if (errno == EINTR) { if (g_sig_stop) return; continue; }
-            LOGE("read(logcat pipe): %s", strerror(errno));
             return;
         }
         if (n == 0) return;
@@ -563,7 +496,6 @@ static void pump(int fd)
         }
         size_t rem = (size_t)(buf + len - start);
         if (discard || rem >= sizeof buf - 1) {
-            if (!discard) LOGW("logcat line longer than %d bytes dropped", LINE_MAX_LEN);
             discard = 1;
             rem = 0;
         }
@@ -572,22 +504,19 @@ static void pump(int fd)
     }
 }
 
-static void reader_loop(void)
-{
+static void reader_loop(void) {
     char *const argv[] = { "logcat", "-b", "main", "-b", "system", "-v", "raw", "-T", "1",
                            "displayfeature:D", "DisplayFeatureManagerService:D", "*:S", NULL };
     int starts = 0;
     while (!g_sig_stop) {
         int p[2];
         if (pipe2(p, O_CLOEXEC) < 0) {
-            LOGE("pipe2: %s", strerror(errno));
             sleep_ms(RESTART_DELAY_MS);
             continue;
         }
         pid_t pid = spawn_child(LOGCAT_BIN, argv, p[1], 1);
         close(p[1]);
         if (pid < 0) {
-            LOGE("fork (logcat): %s", strerror(errno));
             close(p[0]);
             sleep_ms(RESTART_DELAY_MS);
             continue;
@@ -605,30 +534,21 @@ static void reader_loop(void)
         if (reap(pid, &st) == 0) {
             if (g_sig_stop) {
                 LOGI("logcat reader pid=%d stopped", (int)pid);
-            } else if (WIFEXITED(st)) {
-                LOGW("logcat reader pid=%d exited with status %d / pipe closed", (int)pid, WEXITSTATUS(st));
-            } else {
-                LOGW("logcat reader pid=%d terminated by signal %d / pipe closed", (int)pid, WTERMSIG(st));
             }
-        } else {
-            LOGE("waitpid(logcat %d): %s", (int)pid, strerror(errno));
         }
         if (g_sig_stop) break;
-        LOGW("restarting logcat reader in %d ms", RESTART_DELAY_MS);
         sleep_ms(RESTART_DELAY_MS);
     }
 }
 
-static void on_signal(int sig)
-{
+static void on_signal(int sig) {
     g_sig_no = sig;
     g_sig_stop = 1;
     pid_t p = (pid_t)g_logcat_pid;
     if (p > 0) kill(p, SIGKILL);
 }
 
-static void sanitize_stdio(void)
-{
+static void sanitize_stdio(void) {
     for (int fd = 0; fd <= 2; fd++)
         if (fcntl(fd, F_GETFD) < 0) {
             int n = open("/dev/null", O_RDWR);
@@ -636,34 +556,26 @@ static void sanitize_stdio(void)
         }
 }
 
-static void usage(void)
-{
-    fprintf(stderr, "usage: " TAG " [--strength N] [-v]\n"
-                    "  --strength N   eye care strength 0..100\n"
-                    "  -v             verbose: log every incoming data\n");
+static void usage(void) {
+    fprintf(stderr, "usage: " TAG " [--strength N] [-v]\n");
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     sanitize_stdio();
     log_init();
 
     const char *strength_arg = NULL;
-    int bad_arg = 0;
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
         if (!strcmp(a, "-v")) {
             g_verbose = 1;
         } else if (!strcmp(a, "--strength")) {
             if (i + 1 < argc) strength_arg = argv[++i];
-            else { LOGE("argument --strength needs a value"); bad_arg = 1; }
         } else if (!strncmp(a, "--strength=", 11)) {
             strength_arg = a + 11;
         } else if (!strcmp(a, "-h") || !strcmp(a, "--help")) {
             usage();
             return 0;
-        } else {
-            LOGW("unknown argument '%s' ignored", a);
         }
     }
 
@@ -674,8 +586,7 @@ int main(int argc, char **argv)
         ctx[n > 0 ? n : 0] = 0;
         close(cfd);
     }
-    LOGI("start " VERSION " pid=%d uid=%d ppid=%d verbose=%d ctx=%s",
-         (int)getpid(), (int)getuid(), (int)getppid(), g_verbose, ctx);
+    LOGI("start " VERSION " pid=%d verbose=%d", (int)getpid(), g_verbose);
 
     const char *src = "default";
     long sv;
@@ -684,10 +595,7 @@ int main(int argc, char **argv)
             g_strength = (int)sv;
             src = "argument";
             g_strength_explicit = 1;
-        } else {
-            LOGE("invalid --strength '%s' (need integer 0..100), ignored", strength_arg);
         }
-    } else if (bad_arg) {
     }
     if (!strcmp(src, "default")) {
         char pv[128] = "";
@@ -696,16 +604,13 @@ int main(int argc, char **argv)
                 g_strength = (int)sv;
                 src = "property";
                 g_strength_explicit = 1;
-            } else {
-                LOGE("invalid property " PROP_STRENGTH "='%s' (need integer 0..100), ignored", pv);
             }
         }
     }
     {
         struct color on;
         eye_color(PAPER_MODE_MAX, g_strength, &on);
-        LOGI("STRENGTH=%d (source: %s) -> eye care ON = %s %s %s", g_strength, src,
-             on.c[0], on.c[5], on.c[10]);
+        LOGI("STRENGTH=%d -> eye care ON = %s %s %s", g_strength, on.c[0], on.c[5], on.c[10]);
     }
 
     struct sigaction sa;
@@ -716,13 +621,8 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &sa, NULL);
     signal(SIGPIPE, SIG_IGN);
 
-    if (single_instance() < 0)
-        return 1;
-
-    if (wait_for_sf() < 0) {
-        LOGI("interrupted by signal %d while waiting for SurfaceFlinger, exiting", (int)g_sig_no);
-        return 0;
-    }
+    if (single_instance() < 0) return 1;
+    if (wait_for_sf() < 0) return 0;
 
     pthread_t th;
     pthread_attr_t attr;
@@ -736,21 +636,14 @@ int main(int argc, char **argv)
     int err = pthread_create(&th, &attr, applier_main, NULL);
     pthread_sigmask(SIG_SETMASK, &old, NULL);
     pthread_attr_destroy(&attr);
-    if (err) {
-        LOGE("pthread_create: %s", strerror(err));
-        return 1;
-    }
-    LOGI("applier thread started (throttle %d ms)", THROTTLE_MS);
+    if (err) return 1;
 
     reader_loop();
 
-    if (g_sig_no)
-        LOGI("received signal %d (%s), shutting down", (int)g_sig_no, strsignal((int)g_sig_no));
     pthread_mutex_lock(&g_mu);
     g_quit = 1;
     pthread_cond_broadcast(&g_cv);
     pthread_mutex_unlock(&g_mu);
     pthread_join(th, NULL);
-    LOGI("exit");
     return 0;
 }
