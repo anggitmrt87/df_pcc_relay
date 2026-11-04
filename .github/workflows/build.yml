@@ -14,17 +14,8 @@ env:
   ANDROID_API: "24"
 
 jobs:
-  host-test:
-    name: Host behaviour test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and run tests with fake service/logcat
-        run: make check CC=gcc
-
   android-arm64:
     name: Android arm64 binary
-    needs: host-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

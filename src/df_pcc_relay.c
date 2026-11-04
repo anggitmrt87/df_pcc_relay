@@ -1,22 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/*
- * Copyright (C) 2026 SlakkyStar
- * Copyright (C) 2026 Claude (Anthropic)
- */
-
 #include "df_pcc_relay.h"
 
 static int (*g_log_write)(int, const char *, const char *);
 
-static void log_init(void)
-{
+static void log_init(void) {
     void *h = dlopen("liblog.so", RTLD_NOW);
     if (h) g_log_write = (int (*)(int, const char *, const char *))dlsym(h, "__android_log_write");
     if (!g_log_write) fprintf(stderr, TAG ": liblog.so not usable, logging to stderr\n");
 }
 
-static void logmsg(int prio, const char *fmt, ...)
-{
+static void logmsg(int prio, const char *fmt, ...) {
     char buf[768];
     va_list ap;
     va_start(ap, fmt);
@@ -44,7 +37,9 @@ static int g_first_logged;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t  g_cv = PTHREAD_COND_INITIALIZER;
 static struct color    g_pending;
+static struct color    g_last_color; // Menyimpan warna terakhir dari user
 static int             g_has_pending;
+static int             g_has_last_color;
 static int             g_quit;
 
 static void sleep_ms(long ms) {
@@ -323,9 +318,7 @@ static void do_apply(const struct color *c) {
     int rc = run_capture(SERVICE_BIN, argv, out, sizeof out, &st);
 
     if (rc == 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0) {
-        char *nl = strchr(out, '\n');
-        if (nl) *nl = 0;
-        if (g_verbose) LOGI("APPLY OK: %s", out[0] ? out : "no output");
+        // Sukses
     } else {
         LOGE("APPLY FAILED rc=%d", rc);
     }
@@ -344,9 +337,15 @@ static void *applier_main(void *arg) {
         
         cur = g_pending;
         g_has_pending = 0;
+        
+        // Simpan warna ke global untuk reaksi terhadap log MIUI
+        g_last_color = cur;
+        g_has_last_color = 1;
+        
         pthread_mutex_unlock(&g_mu);
 
-        for (int i = 0; i < 100; i++) {
+        // Spam biasa saat user menggeser slider
+        for (int i = 0; i < 30; i++) {
             if (g_quit || g_has_pending) break;
             do_apply(&cur);
             sleep_ms(20);
@@ -360,6 +359,20 @@ static void publish(const struct color *c) {
     g_pending = *c;
     g_has_pending = 1;
     pthread_cond_signal(&g_cv);
+    pthread_mutex_unlock(&g_mu);
+}
+
+// Fungsi baru: Paksa kirim ulang warna terakhir jika MIUI menimpa
+static void force_reapply(void) {
+    pthread_mutex_lock(&g_mu);
+    if (g_has_last_color) {
+        // Jangan set g_has_pending=1 agar applier tidak masuk ke mode Spam 30x.
+        // Tembak langsung di thread ini (blocking sebentar tidak apa-apa).
+        struct color tmp = g_last_color;
+        pthread_mutex_unlock(&g_mu);
+        do_apply(&tmp);
+        return;
+    }
     pthread_mutex_unlock(&g_mu);
 }
 
@@ -467,6 +480,15 @@ static void handle_line(const char *line) {
     if (strstr(line, "displayfeature") || strstr(line, "DisplayFeatureManager") || strstr(line, "Pcc")) {
         if (g_verbose) LOGI("RAW LOG: %s", line);
     }
+    
+    // REAKSI TERHADAP MIUI: Jika AIDL dipanggil atau mode 23 dikirim, MIUI menimpa warna kita.
+    if (strstr(line, "initProxyLocked aidlServiceName") || strstr(line, "mode=23")) {
+        if (g_has_last_color) {
+             force_reapply();
+             return; // Jangan proses setScreenEffect mode=23
+        }
+    }
+
     const char *p = strstr(line, "setScreenEffect displayId=");
     if (p) {
         const char *mp = strstr(p, "mode=");
@@ -632,6 +654,15 @@ int main(int argc, char **argv) {
     if (single_instance() < 0) return 1;
     if (wait_for_sf() < 0) return 0;
 
+    // CABC OFF (Ditambahkan langsung agar aman)
+    LOGI("Disabling CABC via displayfeature HAL...");
+    char *const cabc_argv[] = { "service", "call", "displayfeature", "1", "i32", "0", "i32", "7", "i32", "0", NULL };
+    pid_t cabc_pid = spawn_child(SERVICE_BIN, cabc_argv, -1, 0);
+    if (cabc_pid > 0) {
+        int cabc_st = 0;
+        reap(cabc_pid, &cabc_st);
+    }
+
     pthread_t th;
     pthread_attr_t attr;
     sigset_t blk, old;
@@ -648,8 +679,6 @@ int main(int argc, char **argv) {
 
     reader_loop();
 
-    if (g_sig_no)
-        LOGI("received signal %d (%s), shutting down", (int)g_sig_no, strsignal((int)g_sig_no));
     pthread_mutex_lock(&g_mu);
     g_quit = 1;
     pthread_cond_broadcast(&g_cv);
