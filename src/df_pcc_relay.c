@@ -4,7 +4,6 @@
  * Copyright (C) 2026 Claude (Anthropic)
  */
 
-/* SPDX-License-Identifier: GPL-2.0-only */
 #include "df_pcc_relay.h"
 
 static int (*g_log_write)(int, const char *, const char *);
@@ -308,12 +307,22 @@ static void do_apply(const struct color *c) {
     }
     argv[n] = NULL;
 
+    if (g_verbose) {
+        char dbg[512] = {0};
+        for(int i=6; i<38; i+=2) {
+            if(argv[i+1]) {
+                strncat(dbg, argv[i+1], sizeof(dbg)-strlen(dbg)-1);
+                strncat(dbg, " ", sizeof(dbg)-strlen(dbg)-1);
+            }
+        }
+        LOGI("MATRIX SENT: %s", dbg);
+    }
+
     char out[256] = {0};
     int st = 0;
     int rc = run_capture(SERVICE_BIN, argv, out, sizeof out, &st);
 
     if (rc == 0 && WIFEXITED(st) && WEXITSTATUS(st) == 0) {
-        // Menangkap output sukses
         char *nl = strchr(out, '\n');
         if (nl) *nl = 0;
         if (g_verbose) LOGI("APPLY OK: %s", out[0] ? out : "no output");
@@ -337,7 +346,6 @@ static void *applier_main(void *arg) {
         g_has_pending = 0;
         pthread_mutex_unlock(&g_mu);
 
-        // SPAM EKSTREM: Kirim 100 kali setiap 20ms (Total 2 detik)
         for (int i = 0; i < 100; i++) {
             if (g_quit || g_has_pending) break;
             do_apply(&cur);
@@ -640,6 +648,8 @@ int main(int argc, char **argv) {
 
     reader_loop();
 
+    if (g_sig_no)
+        LOGI("received signal %d (%s), shutting down", (int)g_sig_no, strsignal((int)g_sig_no));
     pthread_mutex_lock(&g_mu);
     g_quit = 1;
     pthread_cond_broadcast(&g_cv);
